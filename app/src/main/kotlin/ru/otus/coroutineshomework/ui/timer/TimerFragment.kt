@@ -4,11 +4,16 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.collection.emptyLongSet
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.coroutineScope
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.otus.coroutineshomework.databinding.FragmentTimerBinding
@@ -16,6 +21,7 @@ import java.util.Calendar
 import java.util.Locale
 import kotlin.properties.Delegates
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.ZERO
 import kotlin.time.Duration.Companion.milliseconds
 
 class TimerFragment : Fragment() {
@@ -25,9 +31,7 @@ class TimerFragment : Fragment() {
 
     private var timerJob: Job? = null
 
-    private var time: Duration by Delegates.observable(Duration.ZERO) { _, _, newValue ->
-        binding.time.text = newValue.toDisplayString()
-    }
+    private var timeFlow: MutableStateFlow<Duration> = MutableStateFlow(ZERO)
 
     private var started by Delegates.observable(false) { _, _, newValue ->
         setButtonsState(newValue)
@@ -57,12 +61,18 @@ class TimerFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         savedInstanceState?.let {
-            time = it.getLong(TIME).milliseconds
+            timeFlow = MutableStateFlow(it.getLong(TIME).milliseconds)
             started = it.getBoolean(STARTED)
         }
         setButtonsState(started)
         with(binding) {
-            time.text = this@TimerFragment.time.toDisplayString()
+            viewLifecycleOwner.lifecycleScope.launch {
+                viewLifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    timeFlow.collect { duration ->
+                        binding.time.text = duration.toDisplayString()
+                    }
+                }
+            }
             btnStart.setOnClickListener {
                 started = true
             }
@@ -74,7 +84,7 @@ class TimerFragment : Fragment() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putLong(TIME, time.inWholeMilliseconds)
+        outState.putLong(TIME, timeFlow.value.inWholeMilliseconds)
         outState.putBoolean(STARTED, started)
     }
 
@@ -84,7 +94,7 @@ class TimerFragment : Fragment() {
             val prevTime = System.currentTimeMillis()
             while(isActive){
                 val curTime = System.currentTimeMillis()
-                time = (curTime-prevTime).milliseconds
+                timeFlow.emit((curTime-prevTime).milliseconds)
                 delay(DELAY)
             }
         }
